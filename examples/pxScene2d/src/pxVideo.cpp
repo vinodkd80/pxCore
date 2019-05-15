@@ -20,6 +20,7 @@
 
 #include "pxVideo.h"
 #include "pxContext.h"
+#include "pxVideoImplAAMP.h"
 
 extern pxContext context;
 
@@ -29,8 +30,13 @@ pxVideo::pxVideo(pxScene2d* scene):pxObject(scene), mVideoTexture()
 #else
 , mEnablePunchThrough(false)
 #endif //ENABLE_SPARK_VIDEO_PUNCHTHROUGH
+,mAutoPlay(false)
+,mUrl("")
 {
 }
+
+pxVideo::~pxVideo()
+{}
 
 void pxVideo::onInit()
 {
@@ -213,15 +219,16 @@ rtError pxVideo::setSecondaryAudioLanguage(const char* /*s*/)
   return RT_OK;
 }
 
-rtError pxVideo::url(rtString& /*v*/) const
+rtError pxVideo::url(rtString& url) const
 {
-  //TODO
+  url = mUrl;
   return RT_OK;
 }
 
-rtError pxVideo::setUrl(const char* /*s*/)
+rtError pxVideo::setUrl(const char* url)
 {
-  //TODO
+  mUrl = rtString(url);
+  rtLogError("%s:%d: URL[%s].",__FUNCTION__,__LINE__,url);
   return RT_OK;
 }
 
@@ -249,15 +256,16 @@ rtError pxVideo::setClosedCaptionsEnabled(bool /*v*/)
   return RT_OK;
 }
 
-rtError pxVideo::autoPlay(bool& /*v*/) const
+rtError pxVideo::autoPlay(bool& autoPlay) const
 {
-  //TODO
+  autoPlay = mAutoPlay;
   return RT_OK;
 }
 
-rtError pxVideo::setAutoPlay(bool /*v*/)
+rtError pxVideo::setAutoPlay(bool value)
 {
-  //TODO
+  mAutoPlay = value;
+  rtLogError("%s:%d: autoPlay[%s].",__FUNCTION__,__LINE__,value?"TRUE":"FALSE");
   return RT_OK;
 }
 
@@ -301,6 +309,15 @@ rtError pxVideo::setAdditionalAuth(rtObjectRef /*params*/)
 {
   //TODO
   return RT_OK;
+}
+
+pxVideo* pxVideo::createPlayer(const rtString& name, pxScene2d* scene)
+{
+	if(name == "AAMP")
+	{
+		return new pxVideoImplAAMP(scene);
+	}
+	return new pxVideo(scene);
 }
 
 rtDefineObject(pxVideo, pxObject);
