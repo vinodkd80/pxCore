@@ -21,7 +21,8 @@
 #ifndef PX_VIDEO_IMPL_AAMP_H
 #define PX_VIDEO_IMPL_AAMP_H
 
-#include "main_aamp.h"
+#include <pthread.h>
+//#include "main_aamp.h"
 #include "pxVideo.h"
 
 class pxVideoImplAAMP: public pxVideo
@@ -34,7 +35,7 @@ public:
   rtError pause() override;
   rtError stop() override;
 private:
-  class PlayerInstanceAAMP* mAamp;
+  pthread_t AAMPrenderThreadID;
 };
 
 #endif // PX_VIDEO_IMPL_AAMP_H
