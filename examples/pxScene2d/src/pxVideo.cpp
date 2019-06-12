@@ -43,10 +43,12 @@ void pxVideo::onInit()
   mReady.send("resolve",this);
   pxObject::onInit();
 }
-
+extern pxContextFramebufferRef gAampFbo;
+extern rtMutex gAampFboMutex;
 void pxVideo::draw()
 {
-  if (!isRotated() && mEnablePunchThrough)
+  //if (!isRotated() && mEnablePunchThrough)
+  if (false)
   {
     int screenX = 0;
     int screenY = 0;
@@ -56,14 +58,17 @@ void pxVideo::draw()
   else
   {
     // TODO - remove red rectangle code and uncomment code below when using video texture
-    static float redColor[4] = {1.0, 0.0, 0.0, 1.0};
-    context.drawRect(mw, mh, 1.0, redColor, redColor);
+    //static float redColor[4] = {1.0, 0.0, 0.0, 1.0};
+    //context.drawRect(mw, mh, 1.0, redColor, redColor);
 
     //TODO - uncomment code below and remove red rectangle when adding video texture support
-    /*
+    
     static pxTextureRef nullMaskRef;
-    context.drawImage(0, 0, mw, mh, mVideoTexture, nullMaskRef);
-    }*/
+    gAampFboMutex.lock();
+    //pxTextureRef videoTexture = context.createTexture(gAampOffscreen);
+    context.drawImage(0, 0, mw, mh, gAampFbo->getTexture(), nullMaskRef);
+    gAampFboMutex.unlock();
+    }
   }
 }
 

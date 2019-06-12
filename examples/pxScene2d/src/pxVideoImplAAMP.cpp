@@ -165,38 +165,60 @@ void AAMPGLinit()
 
 // Function that does the drawing
 // glut calls this function whenever it needs to redraw
-static void AAMPdisplay()
+static pxSharedContextRef sharedContext = context.createSharedContext();
+static pxContextFramebufferRef gAampFbo;
+rtMutex gAampFboMutex;
+pxOffscreen gAampOffscreen;
+extern rtThreadQueue* gUIThreadQueue;
+)
+static newAampFrame(void* context, void* /*data*/)
 {
-	static pxSharedContextRef sharedContext = context.createSharedContext();
+	pxVideo* videoObj = dynamic_cast<pxVideo*>(context);
+	if (videoObj)
+	{
+		videoObject->repaint();
+	    videoObject->repaintParents();
+	}
+}
+static void AAMPdisplay(int width, int height, void* buffer)
+{
 	sharedContext->makeCurrent(true);
 
-	static pxContextFramebufferRef fbo = context.createFramebuffer(pixel_w, pixel_h, false);
+    gAampFboMutex.lock();
+	if (gAampFbo.getPtr() == NULL)
+	{
+		gAampFbo = context.createFramebuffer(width, height);
+	}
+	else
+	{
+		context.updateFramebuffer(gAampFbo, width, height);
+	}
+
+	
+	/* if (firstTime || width / height changes) 
+	{
+		gAampOffscreen.init(width, height);
+	}*/
+
+    //copy buffer in RGBA format to gAampOffscreen
+
+	
 
 	//change fbo width and height if desired
 	//context.updateFramebuffer(fbo, static_cast<int>(floor(w)), static_cast<int>(floor(h)));
-	if (context.setFramebuffer(fbo) == PX_OK)
+	pxContextFramebufferRef prevFbo = context.getCurrentFramebuffer();
+	if (prevFbo.getPtr() != gAampFbo.getPtr() && context.setFramebuffer(gAampFbo) == PX_OK)
 	{
 		// clear the color buffer before each drawing
+		glClearColor(1.0,0,0,1.0);
 		glClear(GL_COLOR_BUFFER_BIT);
 
-		glm::mat4 trans = glm::rotate(
-			glm::mat4(1.0f),
-			currentAngleOfRotation * 360,
-			glm::vec3(1.0f, 1.0f, 1.0f)
-		);
-		currentAngleOfRotation += 0.001;
-		GLint uniTrans = glGetUniformLocation(aampGLprogramId, "trans");
-		glUniformMatrix4fv(uniTrans, 1, GL_FALSE, glm::value_ptr(trans));
+		//aamp->render();
 
-		// draw triangles starting from index 0 and
-		// using 3 indices
-		glDrawArrays(GL_TRIANGLES, 0, 3);
-
-		// swap the buffers and hence show the buffers
-		// content to the screen
-//		glutSwapBuffers();
 		std::cout << "AAMP: Rendered.\n";
 	}
+	gAampFboMutex.unlock();
+	gUIThreadQueue->addTask(newAampFrame, pxVideoObj, NULL);
 }
 
 pxVideoImplAAMP::pxVideoImplAAMP(pxScene2d* scene):pxVideo(scene)
