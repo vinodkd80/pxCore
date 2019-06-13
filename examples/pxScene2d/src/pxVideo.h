@@ -21,6 +21,7 @@
 #ifndef PX_VIDEO_H
 #define PX_VIDEO_H
 
+#include "main_aamp.h"
 #include "pxScene2d.h"
 #include "pxObject.h"
 
@@ -112,6 +113,8 @@ private:
     bool mEnablePunchThrough;
     bool mAutoPlay;
     rtString mUrl;
+    pthread_t AAMPrenderThreadID;
+    class PlayerInstanceAAMP* mAamp;
 };
 
 #endif // PX_VIDEO_H

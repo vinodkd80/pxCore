@@ -1019,7 +1019,7 @@ rtError pxScene2d::createWayland(rtObjectRef p, rtObjectRef& o)
 rtError pxScene2d::createVideo(rtObjectRef p, rtObjectRef& o)
 {
 #ifdef ENABLE_SPARK_VIDEO
-  o = pxVideo::createPlayer("AAMP", this);
+  o = new pxVideo(this);
   o.set(p);
   o.send("init");
   return RT_OK;
