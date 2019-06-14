@@ -76,6 +76,17 @@ void pxVideo::InitPlayerLoop()
   }
 }
 
+void pxVideo::TermPlayerLoop()
+{
+	if(AAMPGstPlayerMainLoop)
+	{
+		g_main_loop_quit(AAMPGstPlayerMainLoop);
+		g_thread_join(aampMainLoopThread);
+		gst_deinit ();
+		printf("%s(): Exited GStreamer MainLoop.\n", __FUNCTION__);
+	}
+}
+
 GLuint pxVideo::LoadShader( GLenum type )
 {
 	GLuint shaderHandle = 0;
@@ -266,7 +277,9 @@ pxVideo::pxVideo(pxScene2d* scene):pxObject(scene), mVideoTexture()
 
 pxVideo::~pxVideo()
 {
+	mAamp->Stop();
 	delete mAamp;
+	TermPlayerLoop();
 }
 
 void pxVideo::onInit()
@@ -335,17 +348,15 @@ void pxVideo::updateYUVFrame_shader(uint8_t *yuvBuffer, int size, int pixel_w, i
 		bool existingFbo = false;
 		if (prevFbo.getPtr() != gAampFbo.getPtr())
 		{
-			printf("NEW FBO.\n");
 			replacedFbo = context.setFramebuffer(gAampFbo);
 		}
 		else
 		{
-			printf("EXISTING FBO.\n");
 			existingFbo = true;
 		}
 		if (existingFbo || replacedFbo == PX_OK)
 		{
-			printf("AAMP: Rendering frame.\n");
+//			printf("AAMP: Rendering frame.\n");
 			unsigned char *yPlane, *uPlane, *vPlane;
 			yPlane = yuvBuffer;
 			uPlane = yPlane + (pixel_w*pixel_h);
@@ -512,7 +523,7 @@ void pxVideo::updateYUVFrame(uint8_t *yuvBuffer, int size, int pixel_w, int pixe
 			glDisable(GL_TEXTURE_2D);
 			glFlush();
 
-			printf("AAMP: Rendered frame.\n");
+//			printf("AAMP: Rendered frame.\n");
 		}
 		if(replacedFbo == PX_OK)
 		{
@@ -539,7 +550,7 @@ void pxVideo::draw()
 	if(NULL != gAampFbo)
 	{
 		context.drawImage(x(), y(), FBO_W, FBO_H,  gAampFbo->getTexture(), nullMaskRef);
-		printf("SPARK: Rendered frame.\n");
+//		printf("SPARK: Rendered frame.\n");
 	}
 	gAampFboMutex.unlock();
   }

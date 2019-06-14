@@ -116,6 +116,7 @@ private:
   GLuint LoadShader( GLenum type );
   void InitYUVShaders();
   void InitPlayerLoop();
+  void TermPlayerLoop();
   static void* AAMPGstPlayer_StreamThread(void *arg);
   static void newAampFrame(void* context, void* data);
 
