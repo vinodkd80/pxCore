@@ -27,6 +27,8 @@
 #include <string>
 #include "pxVideo.h"
 
+using namespace std::placeholders;
+
 pxVideo *pxVideo::pxVideoObj = NULL;
 GMainLoop *pxVideo::AAMPGstPlayerMainLoop;
 
@@ -265,7 +267,11 @@ pxVideo::pxVideo(pxScene2d* scene):pxObject(scene), mVideoTexture()
 	  aampMainLoopThread = NULL;
 	  AAMPGstPlayerMainLoop = NULL;
 	  InitPlayerLoop();
-	  mAamp = new PlayerInstanceAAMP();
+#ifdef AAMP_USE_SHADER
+	  mAamp = new PlayerInstanceAAMP(NULL, std::bind(&pxVideo::updateYUVFrame_shader, this, _1, _2, _3, _4));
+#else
+	  mAamp = new PlayerInstanceAAMP(NULL, std::bind(&pxVideo::updateYUVFrame, this, _1, _2, _3, _4));
+#endif
 	  assert (nullptr != mAamp);
 	  rtLogWarn("OpenGL Version[%s], GLSL Version[%s]\n", glGetString(GL_VERSION), glGetString(GL_SHADING_LANGUAGE_VERSION));
 	  sharedContext = context.createSharedContext();
@@ -291,18 +297,6 @@ void pxVideo::onInit()
 	}
   mReady.send("resolve",this);
   pxObject::onInit();
-}
-
-void updateYUVFrame(uint8_t *yuvBuffer, int size, int pixel_w, int pixel_h)
-{
-	if(pxVideo::pxVideoObj)
-	{
-#ifdef AAMP_USE_SHADER
-		pxVideo::pxVideoObj->updateYUVFrame_shader(yuvBuffer, size, pixel_w, pixel_h);
-#else
-		pxVideo::pxVideoObj->updateYUVFrame(yuvBuffer, size, pixel_w, pixel_h);
-#endif
-	}
 }
 
 void pxVideo::newAampFrame(void* context, void* data)
