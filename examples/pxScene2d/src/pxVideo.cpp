@@ -20,74 +20,35 @@
 
 #define GL_SILENCE_DEPRECATION
 #include <OpenGL/gl3.h>
-#include "pxVideo.h"
-#include "pxContext.h"
-
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
-#include <gst/gst.h>
 #include <iostream>
 #include <string>
-#include "pxContext.h"
+#include "pxVideo.h"
 
-static const char *VSHADER =
-	"attribute vec2 vertexIn;"
-	"attribute vec2 textureIn;"
-	"varying vec2 textureOut;"
-	"uniform mat4 trans;"
-	"void main() {"
-		"gl_Position = trans * vec4(vertexIn,0, 1);"
-		"textureOut = textureIn;"
-	"}";
+pxVideo *pxVideo::pxVideoObj = NULL;
+GMainLoop *pxVideo::AAMPGstPlayerMainLoop;
 
-static const char *FSHADER =
-	"#ifdef GL_ES \n"
-		"  precision mediump float; \n"
-	"#endif \n"
-	"varying vec2 textureOut;"
-	"uniform sampler2D tex_y;"
-	"uniform sampler2D tex_u;"
-	"uniform sampler2D tex_v;"
-	"void main() {"
-		"vec3 yuv;"
-		"vec3 rgb;"
-		"yuv.x = texture2D(tex_y, textureOut).r;"
-		"yuv.y = texture2D(tex_u, textureOut).r - 0.5;"
-		"yuv.z = texture2D(tex_v, textureOut).r - 0.5;"
-		"rgb = mat3( 1, 1, 1, 0, -0.39465, 2.03211, 1.13983, -0.58060,  0) * yuv;"
-		"gl_FragColor = vec4(rgb, 1);"
-	"}";
-
-#define ATTRIB_VERTEX 0
-#define ATTRIB_TEXTURE 1
-
-GLuint mProgramID;
-GLuint id_y, id_u, id_v; // texture id
-GLuint textureUniformY, textureUniformU,textureUniformV;
-static GLuint _vertexArray;
-static GLuint _vertexBuffer[2];
-static const int FPS = 60;
-GLfloat currentAngleOfRotation = 0.0;
-
-static int FBO_W = 1280;
-static int FBO_H = 720;
 extern pxContext context;
-static pxSharedContextRef sharedContext;
-static pxContextFramebufferRef gAampFbo = NULL;
-rtMutex gAampFboMutex;
 extern rtThreadQueue* gUIThreadQueue;
-static bool initialized = false;
-GThread *aampMainLoopThread = NULL;
-static GMainLoop *AAMPGstPlayerMainLoop = NULL;
-void *pxVideoObj = NULL;
+
+static void CheckGlError( int line )
+{
+    int err = glGetError();
+    if( err )
+    {
+        printf( "%d: glGetError: 0x%04x\n", line, err ); // GL_INVALID_OPERATION == 0x0502
+//        abort();
+    }
+}
 
 /**
  * @brief Thread to run mainloop (for standalone mode)
  * @param[in] arg user_data
  * @retval void pointer
  */
-static void* AAMPGstPlayer_StreamThread(void *arg)
+void* pxVideo::AAMPGstPlayer_StreamThread(void *arg)
 {
   if (AAMPGstPlayerMainLoop)
   {
@@ -104,18 +65,18 @@ static void* AAMPGstPlayer_StreamThread(void *arg)
  * @param[in] argc number of arguments
  * @param[in] argv array of arguments
  */
-void InitPlayerLoop()
+void pxVideo::InitPlayerLoop()
 {
   if (!initialized)
   {
     initialized = true;
     gst_init(NULL, NULL);
     AAMPGstPlayerMainLoop = g_main_loop_new(NULL, FALSE);
-    aampMainLoopThread = g_thread_new("AAMPGstPlayerLoop", &AAMPGstPlayer_StreamThread, NULL );
+    aampMainLoopThread = g_thread_new("AAMPGstPlayerLoop", &pxVideo::AAMPGstPlayer_StreamThread, NULL );
   }
 }
 
-static GLuint LoadShader( GLenum type )
+GLuint pxVideo::LoadShader( GLenum type )
 {
 	GLuint shaderHandle = 0;
 	const char *sources[1];
@@ -147,34 +108,20 @@ static GLuint LoadShader( GLenum type )
 	return shaderHandle;
 }
 
-void InitYUVShaders()
+void pxVideo::InitYUVShaders()
 {
 	sharedContext->makeCurrent(true);
 
-    gAampFboMutex.lock();
+	GLint linked;
+
 	if (gAampFbo.getPtr() == NULL)
 	{
-		gAampFbo = context.createFramebuffer(1280, 720);
+		gAampFbo = context.createFramebuffer(1280, 780);
 	}
 	else
 	{
-		context.updateFramebuffer(gAampFbo, 1280, 720);
+		context.updateFramebuffer(gAampFbo, 1280, 780);
 	}
-
-
-	/* if (firstTime || width / height changes)
-	{
-		gAampOffscreen.init(width, height);
-	}*/
-
-    //copy buffer in RGBA format to gAampOffscreen
-
-
-
-	//change fbo width and height if desired
-	//context.updateFramebuffer(fbo, static_cast<int>(floor(w)), static_cast<int>(floor(h)));
-//	pxTextureRef textureRef = GetImageTexture ();
-
 	pxContextFramebufferRef prevFbo = context.getCurrentFramebuffer();
 	pxError replacedFbo = PX_NOTINITIALIZED;
 	bool existingFbo = false;
@@ -182,21 +129,27 @@ void InitYUVShaders()
 	{
 		replacedFbo = context.setFramebuffer(gAampFbo);
 	}
+	else
 	{
 		existingFbo = true;
 	}
 	if (existingFbo || replacedFbo == PX_OK)
 	{
-		GLint linked;
-
+		GLenum gl_status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+		assert( gl_status == GL_FRAMEBUFFER_COMPLETE );
+		CheckGlError(__LINE__);
 		GLint vShader = LoadShader(GL_VERTEX_SHADER);
+		CheckGlError(__LINE__);
 		GLint fShader = LoadShader(GL_FRAGMENT_SHADER);
+		CheckGlError(__LINE__);
 		mProgramID = glCreateProgram();
 		glAttachShader(mProgramID,vShader);
 		glAttachShader(mProgramID,fShader);
+		CheckGlError(__LINE__);
 
 		glBindAttribLocation(mProgramID, ATTRIB_VERTEX, "vertexIn");
 		glBindAttribLocation(mProgramID, ATTRIB_TEXTURE, "textureIn");
+		CheckGlError(__LINE__);
 		glLinkProgram(mProgramID);
 		glValidateProgram(mProgramID);
 
@@ -211,14 +164,15 @@ void InitYUVShaders()
 			free( msg );
 		}
 		glUseProgram(mProgramID);
+		CheckGlError(__LINE__);
 		glDeleteShader(vShader);
 		glDeleteShader(fShader);
-
+		CheckGlError(__LINE__);
 		//Get Uniform Variables Location
 		textureUniformY = glGetUniformLocation(mProgramID, "tex_y");
 		textureUniformU = glGetUniformLocation(mProgramID, "tex_u");
 		textureUniformV = glGetUniformLocation(mProgramID, "tex_v");
-
+		CheckGlError(__LINE__);
 		typedef struct _vertex
 		{
 			float p[2];
@@ -238,7 +192,9 @@ void InitYUVShaders()
 		};
 
 		glGenVertexArrays(1, &_vertexArray);
+		CheckGlError(__LINE__);
 		glBindVertexArray(_vertexArray);
+		CheckGlError(__LINE__);
 		glGenBuffers(2, _vertexBuffer);
 		glBindBuffer(GL_ARRAY_BUFFER, _vertexBuffer[0]);
 		glBufferData(GL_ARRAY_BUFFER, sizeof(vertexPtr), vertexPtr, GL_STATIC_DRAW );
@@ -252,45 +208,34 @@ void InitYUVShaders()
 							  sizeof(Vertex), (const GLvoid *)offsetof(Vertex, uv ) );
 		glEnableVertexAttribArray(ATTRIB_TEXTURE);
 		glBindVertexArray(0);
-
+		CheckGlError(__LINE__);
 		glGenTextures(1, &id_y);
+		CheckGlError(__LINE__);
 		glBindTexture(GL_TEXTURE_2D, id_y);
 		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
+		CheckGlError(__LINE__);
 		glGenTextures(1, &id_u);
 		glBindTexture(GL_TEXTURE_2D, id_u);
 		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
+		CheckGlError(__LINE__);
 		glGenTextures(1, &id_v);
 		glBindTexture(GL_TEXTURE_2D, id_v);
 		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	}
-	if(replacedFbo == PX_OK)
-	{
-		context.setFramebuffer(prevFbo);
-	}
-	gAampFboMutex.unlock();
-}
+		CheckGlError(__LINE__);
 
-
-// Function that does the drawing
-// glut calls this function whenever it needs to redraw
-
-void newAampFrame(void* context, void* data)
-{
-	pxVideo* videoObj = reinterpret_cast<pxVideo*>(context);
-	if (videoObj)
-	{
-		videoObj->onTextureReady();
+		if(replacedFbo == PX_OK)
+		{
+			context.setFramebuffer(prevFbo);
+		}
 	}
 }
 
@@ -303,12 +248,20 @@ pxVideo::pxVideo(pxScene2d* scene):pxObject(scene), mVideoTexture()
 ,mAutoPlay(false)
 ,mUrl("")
 {
+	  FBO_W = 1280;		//TODO: How to get scene size?
+	  FBO_H = 720;
+	  gAampFbo = NULL;
+	  aampMainLoopThread = NULL;
+	  AAMPGstPlayerMainLoop = NULL;
 	  InitPlayerLoop();
 	  mAamp = new PlayerInstanceAAMP();
 	  assert (nullptr != mAamp);
-//	  InitYUVShaders();
-	  pxVideoObj = (void *)this;
+	  rtLogWarn("OpenGL Version[%s], GLSL Version[%s]\n", glGetString(GL_VERSION), glGetString(GL_SHADING_LANGUAGE_VERSION));
 	  sharedContext = context.createSharedContext();
+	  pxVideo::pxVideoObj = this;
+#ifdef AAMP_USE_SHADER
+	  InitYUVShaders();
+#endif
 }
 
 pxVideo::~pxVideo()
@@ -327,7 +280,28 @@ void pxVideo::onInit()
   pxObject::onInit();
 }
 
-void updateYUVFrame_not(uint8_t *yuvBuffer, int size, int pixel_w, int pixel_h)
+void updateYUVFrame(uint8_t *yuvBuffer, int size, int pixel_w, int pixel_h)
+{
+	if(pxVideo::pxVideoObj)
+	{
+#ifdef AAMP_USE_SHADER
+		pxVideo::pxVideoObj->updateYUVFrame_shader(yuvBuffer, size, pixel_w, pixel_h);
+#else
+		pxVideo::pxVideoObj->updateYUVFrame(yuvBuffer, size, pixel_w, pixel_h);
+#endif
+	}
+}
+
+void pxVideo::newAampFrame(void* context, void* data)
+{
+	pxVideo* videoObj = reinterpret_cast<pxVideo*>(context);
+	if (videoObj)
+	{
+		videoObj->onTextureReady();
+	}
+}
+
+void pxVideo::updateYUVFrame_shader(uint8_t *yuvBuffer, int size, int pixel_w, int pixel_h) //YUV=>RGB conversion in shader
 {
 	/** Input in I420 (YUV420) format.
 	  * Buffer structure:
@@ -345,7 +319,7 @@ void updateYUVFrame_not(uint8_t *yuvBuffer, int size, int pixel_w, int pixel_h)
 	{
 		sharedContext->makeCurrent(true);
 
-	    gAampFboMutex.lock();
+		gAampFboMutex.lock();
 		if (gAampFbo.getPtr() == NULL)
 		{
 			gAampFbo = context.createFramebuffer(pixel_w, pixel_h);
@@ -354,14 +328,19 @@ void updateYUVFrame_not(uint8_t *yuvBuffer, int size, int pixel_w, int pixel_h)
 		{
 			context.updateFramebuffer(gAampFbo, pixel_w, pixel_h);
 		}
+		FBO_W = pixel_w;
+		FBO_H = pixel_h;
 		pxContextFramebufferRef prevFbo = context.getCurrentFramebuffer();
 		pxError replacedFbo = PX_NOTINITIALIZED;
 		bool existingFbo = false;
 		if (prevFbo.getPtr() != gAampFbo.getPtr())
 		{
+			printf("NEW FBO.\n");
 			replacedFbo = context.setFramebuffer(gAampFbo);
 		}
+		else
 		{
+			printf("EXISTING FBO.\n");
 			existingFbo = true;
 		}
 		if (existingFbo || replacedFbo == PX_OK)
@@ -393,34 +372,25 @@ void updateYUVFrame_not(uint8_t *yuvBuffer, int size, int pixel_w, int pixel_h)
 			glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, pixel_w/2, pixel_h/2, 0, GL_RED, GL_UNSIGNED_BYTE, vPlane);
 			glUniform1i(textureUniformV, 2);
 
-			//Rotate
-			glm::mat4 trans = glm::rotate(
-				glm::mat4(1.0f),
-				currentAngleOfRotation * 360,
-				glm::vec3(1.0f, 1.0f, 1.0f)
-			);
-			GLint uniTrans = glGetUniformLocation(mProgramID, "trans");
-			glUniformMatrix4fv(uniTrans, 1, GL_FALSE, glm::value_ptr(trans));
-
 			glBindVertexArray(_vertexArray);
 			glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0 );
 			glBindVertexArray(0);
 
-		}
-		if(replacedFbo == PX_OK)
-		{
-			context.setFramebuffer(prevFbo);
+			if(replacedFbo == PX_OK)
+			{
+				context.setFramebuffer(prevFbo);
+			}
 		}
 		gAampFboMutex.unlock();
-		gUIThreadQueue->addTask(newAampFrame, pxVideoObj, NULL);
+		gUIThreadQueue->addTask(newAampFrame, pxVideo::pxVideoObj, NULL);
 	}
 }
-
 
 inline unsigned char RGB_ADJUST(double tmp)
 {
 	return (unsigned char)((tmp >= 0 && tmp <= 255)?tmp:(tmp < 0 ? 0 : 255));
 }
+
 void CONVERT_YUV420PtoRGB24(unsigned char* yuv420buf,unsigned char* rgbOutBuf,int nWidth,int nHeight)
 {
 	unsigned char Y,U,V,R,G,B;
@@ -456,21 +426,7 @@ void CONVERT_YUV420PtoRGB24(unsigned char* yuv420buf,unsigned char* rgbOutBuf,in
 	}
 }
 
-pxTextureRef GetImageTexture ()
-{
-    std::string url = "/tmp/Resources/1.jpeg";
-
-    //url = win.GetOutPath() + url;
-
-    rtRef<rtImageResource> resource = pxImageManager::getImage((char*)url.c_str());
-    pxTextureRef texture = resource->getTexture();
-    if (texture == NULL)
-        return NULL;
-    resource->clearDownloadRequest();
-    return texture;
-}
-
-void updateYUVFrame(uint8_t *yuvBuffer, int size, int pixel_w, int pixel_h)
+void pxVideo::updateYUVFrame(uint8_t *yuvBuffer, int size, int pixel_w, int pixel_h) //YUV=>RGB conversion in C++
 {
 	/** Input in I420 (YUV420) format.
 	  * Buffer structure:
@@ -506,15 +462,12 @@ void updateYUVFrame(uint8_t *yuvBuffer, int size, int pixel_w, int pixel_h)
 		{
 			replacedFbo = context.setFramebuffer(gAampFbo);
 		}
+		else
 		{
 			existingFbo = true;
 		}
 		if (existingFbo || replacedFbo == PX_OK)
 		{
-	#if 0
-			glClearColor(0.0,1.0,0.0,1.0);
-			glClear(GL_COLOR_BUFFER_BIT);
-	#else
 			static std::vector<uint8_t> rgbVect;
 			int rgbLen = pixel_w*pixel_h*3;
 			if(rgbVect.size() < rgbLen)
@@ -522,7 +475,7 @@ void updateYUVFrame(uint8_t *yuvBuffer, int size, int pixel_w, int pixel_h)
 				rgbVect.resize(rgbLen);
 			}
 			uint8_t *buffer_convert = rgbVect.data();
-	printf("AAMP: Buffer size=%d pixel_w=%d pixel_h=%d.\n",size, pixel_w, pixel_h);
+//			printf("AAMP: Buffer size=%d pixel_w=%d pixel_h=%d.\n",size, pixel_w, pixel_h);
 			CONVERT_YUV420PtoRGB24(yuvBuffer,buffer_convert,pixel_w,pixel_h);
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, id_y);
@@ -557,27 +510,22 @@ void updateYUVFrame(uint8_t *yuvBuffer, int size, int pixel_w, int pixel_h)
 			glEnd();
 
 			glDisable(GL_TEXTURE_2D);
+			glFlush();
 
 			printf("AAMP: Rendered frame.\n");
-	#endif
-			glFlush();
-	//		pxTextureRef textureRef = GetImageTexture();
-	//		gAampFbo->setTexture(textureRef);
-			std::cout << "AAMP: Rendered.\n";
 		}
 		if(replacedFbo == PX_OK)
 		{
 			context.setFramebuffer(prevFbo);
 		}
 		gAampFboMutex.unlock();
-		gUIThreadQueue->addTask(newAampFrame, pxVideoObj, NULL);
+		gUIThreadQueue->addTask(newAampFrame, pxVideo::pxVideoObj, NULL);
 	}
 }
 
 void pxVideo::draw()
 {
-  //if (!isRotated() && mEnablePunchThrough)
-  if (false)
+  if (mEnablePunchThrough && !isRotated())
   {
     int screenX = 0;
     int screenY = 0;
@@ -586,24 +534,14 @@ void pxVideo::draw()
   }
   else
   {
-    // TODO - remove red rectangle code and uncomment code below when using video texture
-    //static float redColor[4] = {1.0, 0.0, 0.0, 1.0};
-    //context.drawRect(mw, mh, 1.0, redColor, redColor);
-
-    //TODO - uncomment code below and remove red rectangle when adding video texture support
-    
-	  static pxTextureRef nullMaskRef;
-	  static float color[4] = {1.0, 0.0, 0.0, 1.0};
-//	  static pxTextureRef textureRef = GetImageTexture ();
-//      context.drawImage(100, 100, 1280, 720, textureRef, nullMaskRef);
-//	  //context.drawImage(0, 0, 1280, 720,  textureRef, nullMaskRef, true, color, pxConstantsStretch::STRETCH, pxConstantsStretch::STRETCH, true, pxConstantsMaskOperation::NORMAL);
-	  if(NULL != gAampFbo)
-	  {
-		gAampFboMutex.lock();
-		context.drawImage(0, 0, 1280, 720,  gAampFbo->getTexture(), nullMaskRef);
-		gAampFboMutex.unlock();
+	static pxTextureRef nullMaskRef;
+	gAampFboMutex.lock();
+	if(NULL != gAampFbo)
+	{
+		context.drawImage(x(), y(), FBO_W, FBO_H,  gAampFbo->getTexture(), nullMaskRef);
 		printf("SPARK: Rendered frame.\n");
-	  }
+	}
+	gAampFboMutex.unlock();
   }
 }
 
@@ -761,15 +699,15 @@ rtError pxVideo::setSecondaryAudioLanguage(const char* /*s*/)
 
 rtError pxVideo::url(rtString& url) const
 {
-  url = mUrl;
-  return RT_OK;
+	url = mUrl;
+	return RT_OK;
 }
 
 rtError pxVideo::setUrl(const char* url)
 {
-  mUrl = rtString(url);
-  rtLogError("%s:%d: URL[%s].",__FUNCTION__,__LINE__,url);
-  return RT_OK;
+	mUrl = rtString(url);
+	rtLogError("%s:%d: URL[%s].",__FUNCTION__,__LINE__,url);
+	return RT_OK;
 }
 
 rtError pxVideo::tsbEnabled(bool& /*v*/) const
@@ -798,37 +736,43 @@ rtError pxVideo::setClosedCaptionsEnabled(bool /*v*/)
 
 rtError pxVideo::autoPlay(bool& autoPlay) const
 {
-  autoPlay = mAutoPlay;
-  return RT_OK;
+	autoPlay = mAutoPlay;
+	return RT_OK;
 }
 
 rtError pxVideo::setAutoPlay(bool value)
 {
-  mAutoPlay = value;
-  rtLogError("%s:%d: autoPlay[%s].",__FUNCTION__,__LINE__,value?"TRUE":"FALSE");
-  return RT_OK;
+	mAutoPlay = value;
+	rtLogError("%s:%d: autoPlay[%s].",__FUNCTION__,__LINE__,value?"TRUE":"FALSE");
+	return RT_OK;
 }
 
 rtError pxVideo::play()
 {
-  rtLogError("%s:%d.",__FUNCTION__,__LINE__);
-  if(!mUrl.isEmpty())
-  {
-	  mAamp->Tune(mUrl.cString());
-  }
-  return RT_OK;
+	rtLogError("%s:%d.",__FUNCTION__,__LINE__);
+	if(!mUrl.isEmpty())
+	{
+		mAamp->Tune(mUrl.cString());
+	}
+	return RT_OK;
 }
 
 rtError pxVideo::pause()
 {
-  //TODO
-  return RT_OK;
+	if(mAamp)
+	{
+		mAamp->SetRate(0);
+	}
+	return RT_OK;
 }
 
 rtError pxVideo::stop()
 {
-  mAamp->Stop();
-  return RT_OK;
+	if(mAamp)
+	{
+		mAamp->Stop();
+	}
+	return RT_OK;
 }
 
 rtError pxVideo::setSpeed(float /*speed*/, float /*overshootCorrection*/)
