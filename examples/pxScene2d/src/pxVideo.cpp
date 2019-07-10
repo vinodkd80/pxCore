@@ -35,16 +35,6 @@ GMainLoop *pxVideo::AAMPGstPlayerMainLoop;
 extern pxContext context;
 extern rtThreadQueue* gUIThreadQueue;
 
-static void CheckGlError( int line )
-{
-    int err = glGetError();
-    if( err )
-    {
-        printf( "%d: glGetError: 0x%04x\n", line, err ); // GL_INVALID_OPERATION == 0x0502
-//        abort();
-    }
-}
-
 /**
  * @brief Thread to run mainloop (for standalone mode)
  * @param[in] arg user_data
@@ -89,170 +79,7 @@ void pxVideo::TermPlayerLoop()
 	}
 }
 
-GLuint pxVideo::LoadShader( GLenum type )
-{
-	GLuint shaderHandle = 0;
-	const char *sources[1];
-
-	if(GL_VERTEX_SHADER == type)
-	{
-		sources[0] = VSHADER;
-	}
-	else
-	{
-		sources[0] = FSHADER;
-	}
-
-	if( sources[0] )
-	{
-		shaderHandle = glCreateShader(type);
-		glShaderSource(shaderHandle, 1, sources, 0);
-		glCompileShader(shaderHandle);
-		GLint compileSuccess;
-		glGetShaderiv(shaderHandle, GL_COMPILE_STATUS, &compileSuccess);
-		if (compileSuccess == GL_FALSE)
-		{
-			GLchar msg[1024];
-			glGetShaderInfoLog(shaderHandle, sizeof(msg), 0, &msg[0]);
-			printf( "%s\n", msg );
-		}
-	}
-
-	return shaderHandle;
-}
-
-void pxVideo::InitYUVShaders()
-{
-	sharedContext->makeCurrent(true);
-
-	GLint linked;
-
-	if (gAampFbo.getPtr() == NULL)
-	{
-		gAampFbo = context.createFramebuffer(1280, 780);
-	}
-	else
-	{
-		context.updateFramebuffer(gAampFbo, 1280, 780);
-	}
-	pxContextFramebufferRef prevFbo = context.getCurrentFramebuffer();
-	pxError replacedFbo = PX_NOTINITIALIZED;
-	bool existingFbo = false;
-	if (prevFbo.getPtr() != gAampFbo.getPtr())
-	{
-		replacedFbo = context.setFramebuffer(gAampFbo);
-	}
-	else
-	{
-		existingFbo = true;
-	}
-	if (existingFbo || replacedFbo == PX_OK)
-	{
-		GLenum gl_status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-		assert( gl_status == GL_FRAMEBUFFER_COMPLETE );
-		CheckGlError(__LINE__);
-		GLint vShader = LoadShader(GL_VERTEX_SHADER);
-		CheckGlError(__LINE__);
-		GLint fShader = LoadShader(GL_FRAGMENT_SHADER);
-		CheckGlError(__LINE__);
-		mProgramID = glCreateProgram();
-		glAttachShader(mProgramID,vShader);
-		glAttachShader(mProgramID,fShader);
-		CheckGlError(__LINE__);
-
-		glBindAttribLocation(mProgramID, ATTRIB_VERTEX, "vertexIn");
-		glBindAttribLocation(mProgramID, ATTRIB_TEXTURE, "textureIn");
-		CheckGlError(__LINE__);
-		glLinkProgram(mProgramID);
-		glValidateProgram(mProgramID);
-
-		glGetProgramiv(mProgramID, GL_LINK_STATUS, &linked);
-		if( linked == GL_FALSE )
-		{
-			GLint logLen;
-			glGetProgramiv(mProgramID, GL_INFO_LOG_LENGTH, &logLen);
-			GLchar *msg = (GLchar *)malloc(sizeof(GLchar)*logLen);
-			glGetProgramInfoLog(mProgramID, logLen, &logLen, msg );
-			printf( "%s\n", msg );
-			free( msg );
-		}
-		glUseProgram(mProgramID);
-		CheckGlError(__LINE__);
-		glDeleteShader(vShader);
-		glDeleteShader(fShader);
-		CheckGlError(__LINE__);
-		//Get Uniform Variables Location
-		textureUniformY = glGetUniformLocation(mProgramID, "tex_y");
-		textureUniformU = glGetUniformLocation(mProgramID, "tex_u");
-		textureUniformV = glGetUniformLocation(mProgramID, "tex_v");
-		CheckGlError(__LINE__);
-		typedef struct _vertex
-		{
-			float p[2];
-			float uv[2];
-		} Vertex;
-
-		static const Vertex vertexPtr[4] =
-		{
-			{{-1,-1}, {0.0,1 } },
-			{{ 1,-1}, {1,1 } },
-			{{ 1, 1}, {1,0.0 } },
-			{{-1, 1}, {0.0,0.0} }
-		};
-		static const unsigned short index[6] =
-		{
-			0,1,2, 2,3,0
-		};
-
-		glGenVertexArrays(1, &_vertexArray);
-		CheckGlError(__LINE__);
-		glBindVertexArray(_vertexArray);
-		CheckGlError(__LINE__);
-		glGenBuffers(2, _vertexBuffer);
-		glBindBuffer(GL_ARRAY_BUFFER, _vertexBuffer[0]);
-		glBufferData(GL_ARRAY_BUFFER, sizeof(vertexPtr), vertexPtr, GL_STATIC_DRAW );
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _vertexBuffer[1]);
-		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(index), index, GL_STATIC_DRAW );
-		glVertexAttribPointer(ATTRIB_VERTEX, 2, GL_FLOAT, GL_FALSE,
-								sizeof(Vertex), (const GLvoid *)offsetof(Vertex,p) );
-		glEnableVertexAttribArray(ATTRIB_VERTEX);
-
-		glVertexAttribPointer(ATTRIB_TEXTURE, 2, GL_FLOAT, GL_FALSE,
-							  sizeof(Vertex), (const GLvoid *)offsetof(Vertex, uv ) );
-		glEnableVertexAttribArray(ATTRIB_TEXTURE);
-		glBindVertexArray(0);
-		CheckGlError(__LINE__);
-		glGenTextures(1, &id_y);
-		CheckGlError(__LINE__);
-		glBindTexture(GL_TEXTURE_2D, id_y);
-		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		CheckGlError(__LINE__);
-		glGenTextures(1, &id_u);
-		glBindTexture(GL_TEXTURE_2D, id_u);
-		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		CheckGlError(__LINE__);
-		glGenTextures(1, &id_v);
-		glBindTexture(GL_TEXTURE_2D, id_v);
-		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		CheckGlError(__LINE__);
-
-		if(replacedFbo == PX_OK)
-		{
-			context.setFramebuffer(prevFbo);
-		}
-	}
-}
-
-pxVideo::pxVideo(pxScene2d* scene):pxObject(scene), mVideoTexture()
+pxVideo::pxVideo(pxScene2d* scene):pxObject(scene)
 #ifdef ENABLE_SPARK_VIDEO_PUNCHTHROUGH
  ,mEnablePunchThrough(true)
 #else
@@ -261,24 +88,14 @@ pxVideo::pxVideo(pxScene2d* scene):pxObject(scene), mVideoTexture()
 ,mAutoPlay(false)
 ,mUrl("")
 {
-	  FBO_W = 1280;		//TODO: How to get scene size?
-	  FBO_H = 720;
-	  gAampFbo = NULL;
 	  aampMainLoopThread = NULL;
 	  AAMPGstPlayerMainLoop = NULL;
 	  InitPlayerLoop();
-#ifdef AAMP_USE_SHADER
-	  mAamp = new PlayerInstanceAAMP(NULL, std::bind(&pxVideo::updateYUVFrame_shader, this, _1, _2, _3, _4));
-#else
+	 //ENABLE_SPARK_VIDEO_PUNCHTHROUGH -- VINOD : RDK doesn't need the callback, it needs the pass window params instead
 	  mAamp = new PlayerInstanceAAMP(NULL, std::bind(&pxVideo::updateYUVFrame, this, _1, _2, _3, _4));
-#endif
 	  assert (nullptr != mAamp);
-	  rtLogWarn("OpenGL Version[%s], GLSL Version[%s]\n", glGetString(GL_VERSION), glGetString(GL_SHADING_LANGUAGE_VERSION));
-	  sharedContext = context.createSharedContext();
 	  pxVideo::pxVideoObj = this;
-#ifdef AAMP_USE_SHADER
-	  InitYUVShaders();
-#endif
+	  mYuvBuffer.buffer = NULL;
 }
 
 pxVideo::~pxVideo()
@@ -308,100 +125,17 @@ void pxVideo::newAampFrame(void* context, void* data)
 	}
 }
 
-void pxVideo::updateYUVFrame_shader(uint8_t *yuvBuffer, int size, int pixel_w, int pixel_h) //YUV=>RGB conversion in shader
-{
-	/** Input in I420 (YUV420) format.
-	  * Buffer structure:
-	  * ----------
-	  * |        |
-	  * |   Y    | size = w*h
-	  * |        |
-	  * |________|
-	  * |   U    |size = w*h/4
-	  * |--------|
-	  * |   V    |size = w*h/4
-	  * ----------*
-	  */
-	if(yuvBuffer)
-	{
-		sharedContext->makeCurrent(true);
-
-		gAampFboMutex.lock();
-		if (gAampFbo.getPtr() == NULL)
-		{
-			gAampFbo = context.createFramebuffer(pixel_w, pixel_h);
-		}
-		else
-		{
-			context.updateFramebuffer(gAampFbo, pixel_w, pixel_h);
-		}
-		FBO_W = pixel_w;
-		FBO_H = pixel_h;
-		pxContextFramebufferRef prevFbo = context.getCurrentFramebuffer();
-		pxError replacedFbo = PX_NOTINITIALIZED;
-		bool existingFbo = false;
-		if (prevFbo.getPtr() != gAampFbo.getPtr())
-		{
-			replacedFbo = context.setFramebuffer(gAampFbo);
-		}
-		else
-		{
-			existingFbo = true;
-		}
-		if (existingFbo || replacedFbo == PX_OK)
-		{
-//			printf("AAMP: Rendering frame.\n");
-			unsigned char *yPlane, *uPlane, *vPlane;
-			yPlane = yuvBuffer;
-			uPlane = yPlane + (pixel_w*pixel_h);
-			vPlane = uPlane + (pixel_w*pixel_h)/4;
-
-			glClearColor(0.0,0.0,0.0,0.0);
-			glClear(GL_COLOR_BUFFER_BIT);
-
-			//Y
-			glActiveTexture(GL_TEXTURE0);
-			glBindTexture(GL_TEXTURE_2D, id_y);
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, pixel_w, pixel_h, 0, GL_RED, GL_UNSIGNED_BYTE, yPlane);
-			glUniform1i(textureUniformY, 0);
-
-			//U
-			glActiveTexture(GL_TEXTURE1);
-			glBindTexture(GL_TEXTURE_2D, id_u);
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, pixel_w/2, pixel_h/2, 0, GL_RED, GL_UNSIGNED_BYTE, uPlane);
-			glUniform1i(textureUniformU, 1);
-
-			//V
-			glActiveTexture(GL_TEXTURE2);
-			glBindTexture(GL_TEXTURE_2D, id_v);
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, pixel_w/2, pixel_h/2, 0, GL_RED, GL_UNSIGNED_BYTE, vPlane);
-			glUniform1i(textureUniformV, 2);
-
-			glBindVertexArray(_vertexArray);
-			glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0 );
-			glBindVertexArray(0);
-
-			if(replacedFbo == PX_OK)
-			{
-				context.setFramebuffer(prevFbo);
-			}
-		}
-		gAampFboMutex.unlock();
-		gUIThreadQueue->addTask(newAampFrame, pxVideo::pxVideoObj, NULL);
-	}
-}
-
 inline unsigned char RGB_ADJUST(double tmp)
 {
 	return (unsigned char)((tmp >= 0 && tmp <= 255)?tmp:(tmp < 0 ? 0 : 255));
 }
 
-void CONVERT_YUV420PtoRGB24(unsigned char* yuv420buf,unsigned char* rgbOutBuf,int nWidth,int nHeight)
+void CONVERT_YUV420PtoRGBA32(unsigned char* yuv420buf,unsigned char* rgbOutBuf,int nWidth,int nHeight)
 {
 	unsigned char Y,U,V,R,G,B;
 	unsigned char* yPlane,*uPlane,*vPlane;
 	int rgb_width , u_width;
-	rgb_width = nWidth * 3;
+	rgb_width = nWidth * 4;
 	u_width = (nWidth >> 1);
 	int offSet = 0;
 
@@ -422,16 +156,17 @@ void CONVERT_YUV420PtoRGB24(unsigned char* yuv420buf,unsigned char* rgbOutBuf,in
 			R = RGB_ADJUST((Y + (1.4075 * (V - 128))));
 			G = RGB_ADJUST((Y - (0.3455 * (U - 128) - 0.7169 * (V - 128))));
 			B = RGB_ADJUST((Y + (1.7790 * (U - 128))));
-			offSet = rgb_width * i + j * 3;
+			offSet = rgb_width * i + j * 4;
 
 			rgbOutBuf[offSet] = B;
 			rgbOutBuf[offSet + 1] = G;
 			rgbOutBuf[offSet + 2] = R;
+			rgbOutBuf[offSet + 3] = 255;
 		}
 	}
 }
 
-void pxVideo::updateYUVFrame(uint8_t *yuvBuffer, int size, int pixel_w, int pixel_h) //YUV=>RGB conversion in C++
+void pxVideo::updateYUVFrame(uint8_t *yuvBuffer, int size, int pixel_w, int pixel_h)
 {
 	/** Input in I420 (YUV420) format.
 	  * Buffer structure:
@@ -447,83 +182,18 @@ void pxVideo::updateYUVFrame(uint8_t *yuvBuffer, int size, int pixel_w, int pixe
 	  */
 	if(yuvBuffer)
 	{
-		sharedContext->makeCurrent(true);
-
-		gAampFboMutex.lock();
-		if (gAampFbo.getPtr() == NULL)
+		mYuvFrameMutex.lock();
+		if (mYuvBuffer.buffer == NULL)
 		{
-			gAampFbo = context.createFramebuffer(1280, 720);
+			uint8_t *buffer = (uint8_t *) malloc(size);
+			memcpy(buffer, yuvBuffer, size);
+			mYuvBuffer.buffer = buffer;
+			mYuvBuffer.size = size;
+			mYuvBuffer.pixel_w = pixel_w;
+			mYuvBuffer.pixel_h = pixel_h;
 		}
-		else
-		{
-			context.updateFramebuffer(gAampFbo, 1280, 720);
-		}
-		FBO_W = 1280;
-		FBO_H = 720;
-		pxContextFramebufferRef prevFbo = context.getCurrentFramebuffer();
-		pxError replacedFbo = PX_NOTINITIALIZED;
-		bool existingFbo = false;
-		if (prevFbo.getPtr() != gAampFbo.getPtr())
-		{
-			replacedFbo = context.setFramebuffer(gAampFbo);
-		}
-		else
-		{
-			existingFbo = true;
-		}
-		if (existingFbo || replacedFbo == PX_OK)
-		{
-			static std::vector<uint8_t> rgbVect;
-			int rgbLen = pixel_w*pixel_h*3;
-			if(rgbVect.size() < rgbLen)
-			{
-				rgbVect.resize(rgbLen);
-			}
-			uint8_t *buffer_convert = rgbVect.data();
-//			printf("AAMP: Buffer size=%d pixel_w=%d pixel_h=%d.\n",size, pixel_w, pixel_h);
-			CONVERT_YUV420PtoRGB24(yuvBuffer,buffer_convert,pixel_w,pixel_h);
-			glActiveTexture(GL_TEXTURE0);
-			glBindTexture(GL_TEXTURE_2D, id_y);
+		mYuvFrameMutex.unlock();
 
-			glClearColor(0.0,1.0,0.0,1.0);
-			glClear(GL_COLOR_BUFFER_BIT);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-
-			glTexImage2D(GL_TEXTURE_2D, 0, 3, pixel_w, pixel_h, 0, GL_RGB, GL_UNSIGNED_BYTE,buffer_convert);
-
-			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-			glEnable(GL_TEXTURE_2D);
-			glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-
-			glBegin(GL_QUADS);
-
-				glTexCoord2f(0.0, 1.0);
-				glVertex3f(-1.0, -1.0, 0.0);
-
-				glTexCoord2f(0.0, 0.0);
-				glVertex3f(-1.0, 1.0, 0.0);
-
-				glTexCoord2f(1.0, 0.0);
-				glVertex3f(1.0, 1.0, 0.0);
-
-				glTexCoord2f(1.0,1.0);
-				glVertex3f(1.0, -1.0, 0.0);
-
-			glEnd();
-
-			glDisable(GL_TEXTURE_2D);
-			glFlush();
-
-//			printf("AAMP: Rendered frame.\n");
-		}
-		if(replacedFbo == PX_OK)
-		{
-			context.setFramebuffer(prevFbo);
-		}
-		gAampFboMutex.unlock();
 		gUIThreadQueue->addTask(newAampFrame, pxVideo::pxVideoObj, NULL);
 	}
 }
@@ -539,14 +209,29 @@ void pxVideo::draw()
   }
   else
   {
-	static pxTextureRef nullMaskRef;
-	gAampFboMutex.lock();
-	if(NULL != gAampFbo)
+	YUVBUFFER yuvBuffer{NULL,0,0,0};
+	mYuvFrameMutex.lock();
+	if(mYuvBuffer.buffer)
 	{
-		context.drawImage(x(), y(), FBO_W, FBO_H,  gAampFbo->getTexture(), nullMaskRef);
-//		printf("SPARK: Rendered frame.\n");
+		yuvBuffer = mYuvBuffer;
+		mYuvBuffer.buffer = NULL;
 	}
-	gAampFboMutex.unlock();
+	mYuvFrameMutex.unlock();
+
+	if(yuvBuffer.buffer)
+	{
+		static pxTextureRef nullMaskRef;
+
+		int rgbLen = yuvBuffer.pixel_w * yuvBuffer.pixel_h*4;
+		uint8_t *buffer_convert = (uint8_t *) malloc(rgbLen);
+		CONVERT_YUV420PtoRGBA32(yuvBuffer.buffer,buffer_convert,yuvBuffer.pixel_w, yuvBuffer.pixel_h);
+
+		mOffscreen.init(yuvBuffer.pixel_w, yuvBuffer.pixel_h);
+		mOffscreen.setBase(buffer_convert);
+		pxTextureRef videoFrame = context.createTexture(mOffscreen);
+		context.drawImage(0, 0, mw, mh,  videoFrame, nullMaskRef, false, NULL, pxConstantsStretch::STRETCH, pxConstantsStretch::STRETCH);
+		free(yuvBuffer.buffer);
+	}
   }
 }
 
@@ -780,10 +465,13 @@ rtError pxVideo::stop()
 	return RT_OK;
 }
 
-rtError pxVideo::setSpeed(float /*speed*/, float /*overshootCorrection*/)
+rtError pxVideo::setSpeed(float speed, float overshootCorrection)
 {
-  //TODO
-  return RT_OK;
+	if(mAamp)
+	{
+		mAamp->SetRate(speed);
+	}
+	return RT_OK;
 }
 
 rtError pxVideo::setPositionRelative(float /*seconds*/)
