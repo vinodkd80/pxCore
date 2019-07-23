@@ -18,11 +18,6 @@
 
 // pxText.h
 
-#define GL_SILENCE_DEPRECATION
-#include <OpenGL/gl3.h>
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
 #include <iostream>
 #include <string>
 #include "pxVideo.h"
@@ -91,8 +86,14 @@ pxVideo::pxVideo(pxScene2d* scene):pxObject(scene)
 	  aampMainLoopThread = NULL;
 	  AAMPGstPlayerMainLoop = NULL;
 	  InitPlayerLoop();
-	 //ENABLE_SPARK_VIDEO_PUNCHTHROUGH -- VINOD : RDK doesn't need the callback, it needs the pass window params instead
-	  mAamp = new PlayerInstanceAAMP(NULL, std::bind(&pxVideo::updateYUVFrame, this, _1, _2, _3, _4));
+
+	  std::function< void(uint8_t *, int, int, int) > cbExportFrames = nullptr;
+	  if(!mEnablePunchThrough)
+	  {
+		  //Spark will render frames
+		  cbExportFrames = std::bind(&pxVideo::updateYUVFrame, this, _1, _2, _3, _4);
+	  }
+	  mAamp = new PlayerInstanceAAMP(NULL, cbExportFrames);
 	  assert (nullptr != mAamp);
 	  pxVideo::pxVideoObj = this;
 	  mYuvBuffer.buffer = NULL;
@@ -345,9 +346,12 @@ rtError pxVideo::speed(float& /*v*/) const
   return RT_OK;
 }
 
-rtError pxVideo::setSpeedProperty(float /*v*/)
+rtError pxVideo::setSpeedProperty(float speed)
 {
-  //TODO
+  if(mAamp)
+  {
+     mAamp->SetRate(speed);
+  }
   return RT_OK;
 }
 
@@ -395,7 +399,19 @@ rtError pxVideo::url(rtString& url) const
 
 rtError pxVideo::setUrl(const char* url)
 {
+	bool changingURL = false;
+	if(!mUrl.isEmpty())
+	{
+		changingURL = true;
+		stop();
+	}
+
 	mUrl = rtString(url);
+
+	if(changingURL && mAutoPlay)
+	{
+		play();
+	}
 	rtLogError("%s:%d: URL[%s].",__FUNCTION__,__LINE__,url);
 	return RT_OK;
 }
