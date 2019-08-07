@@ -90,10 +90,15 @@ pxVideo::pxVideo(pxScene2d* scene):pxObject(scene)
 	  std::function< void(uint8_t *, int, int, int) > cbExportFrames = nullptr;
 	  if(!mEnablePunchThrough)
 	  {
+		  //Keeping this block to dynamically turn punch through on/off
 		  //Spark will render frames
 		  cbExportFrames = std::bind(&pxVideo::updateYUVFrame, this, _1, _2, _3, _4);
 	  }
-	  mAamp = new PlayerInstanceAAMP(NULL, cbExportFrames);
+	  mAamp = new PlayerInstanceAAMP(NULL
+#ifndef ENABLE_SPARK_VIDEO_PUNCHTHROUGH //TODO: Remove this check, once the official builds contain the second argument to PlayerInstanceAAMP
+			  , cbExportFrames
+#endif
+			  );
 	  assert (nullptr != mAamp);
 	  pxVideo::pxVideoObj = this;
 	  mYuvBuffer.buffer = NULL;
